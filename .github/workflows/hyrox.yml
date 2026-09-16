@@ -1,34 +1,43 @@
 name: HYROX Ticket Daily Report & Monitor
-
 on:
   schedule:
-    # 1. 每天北京时间 09:00 (UTC 01:00) 触发早报
+    # 北京时间 09:00 → UTC 01:00 早报
     - cron: '0 1 * * *'
-    # 2. 每天北京时间 17:00 (UTC 09:00) 触发晚报
-    - cron: '0 9 * * *'
-    # 3. 每 10 分钟自动运行一次，监控重点组别余票
+    # 北京时间 18:00 → UTC 10:00 晚报
+    - cron: '0 10 * * *'
+    # 每10分钟监控余票
     - cron: '*/10 * * * *'
-  workflow_dispatch: # 支持在 GitHub 页面手动点击触发
+  workflow_dispatch:
 
 jobs:
   check-ticket:
     runs-on: ubuntu-latest
+    timeout-minutes: 3
+    concurrency:
+      group: hyrox-check
+      cancel-in-progress: true
+
     steps:
       - name: 检出仓库代码
         uses: actions/checkout@v4
 
-      - name: 配置 Python 环境
+      - name: 设置系统时区 Asia/Shanghai
+        run: sudo timedatectl set-timezone Asia/Shanghai
+
+      - name: 配置Python 3.10
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: 安装 Python 依赖
+      - name: 安装依赖
         run: |
-          pip install requests
+          pip install requests beautifulsoup4
 
-      - name: 执行查票及日报任务
+      - name: 执行查票脚本
         env:
           SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
           SENDER_PASS: ${{ secrets.SENDER_PASS }}
           RECEIVER_EMAIL: ${{ secrets.RECEIVER_EMAIL }}
+          GIST_ID: ${{ secrets.GIST_ID }}
+          GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
         run: python hyrox_check.py
