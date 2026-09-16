@@ -1,0 +1,32 @@
+name: HYROX Ticket Daily Report & Monitor
+
+on:
+  schedule:
+    # 1. 每天 UTC 01:00 (即北京时间 09:00) 触发一次全组别每日早报
+    - cron: '0 1 * * *'
+    # 2. 每 10 分钟自动运行一次，监控 Women Single Open 组别余票
+    - cron: '*/10 * * * *'
+  workflow_dispatch: # 支持在 GitHub 页面手动点击触发
+
+jobs:
+  check-ticket:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出仓库代码
+        uses: actions/checkout@v3
+
+      - name: 配置 Python 环境
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: 安装 Python 依赖
+        run: |
+          pip install requests
+
+      - name: 执行查票及日报任务
+        env:
+          SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
+          SENDER_PASS: ${{ secrets.SENDER_PASS }}
+          RECEIVER_EMAIL: ${{ secrets.RECEIVER_EMAIL }}
+        run: python hyrox_check.py
