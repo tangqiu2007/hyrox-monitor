@@ -56,7 +56,7 @@ def send_email(subject: str, body: str) -> bool:
         return False
     try:
         msg = MIMEText(body, "plain", "utf-8")
-        # 使用 formataddr 规范发件人 Header，解决部分 SMTP 网关因中文或特殊符号退信的问题
+        # 使用 formataddr 规范发件人 Header，解决部分 SMTP 网关退信问题
         msg["From"] = formataddr(("HYROX查票助手", SENDER_EMAIL))
         msg["To"] = Header(RECEIVER_EMAIL)
         msg["Subject"] = Header(subject, "utf-8")
@@ -132,14 +132,14 @@ def fetch_page_html() -> str:
 def is_division_available(soup: BeautifulSoup, city_keyword: str, division_name: str) -> bool:
     """
     精确定位具体城市和组别的最小 DOM 卡片，判断该组别是否有票。
-    解决因遍历全页外层 div 导致其他组别售罄时误判本组别售罄的 Bug。
+    避免全页查找导致单组别售罄误判全局。
     """
     city_kw = city_keyword.lower()
     div_kw = division_name.lower()
     sold_tags = ["sold out", "soldout", "已售罄", "暂无名额"]
 
     candidate_tags = soup.find_all(["div", "section", "article", "tr", "li"])
-    
+
     # 查找同时包含城市关键字与组别关键字的 DOM 节点
     matching_nodes = []
     for tag in candidate_tags:
@@ -224,12 +224,15 @@ def main():
             )
             send_email("🔥【余票紧急提醒】HYROX 关注组别出现名额", body)
 
-        # 保存本轮状态到 Gist
-        save_current_state(current_state)
+        # ---------- 自动补发每日早/晚报逻辑（记录日期到 Gist，彻底解决 Actions 延迟漏发问题） ----------
+        today_str = now_bj.strftime("%Y-%m-%d")
+        last_morning_date = last_state.get("last_morning_date") if last_state else None
+        last_evening_date = last_state.get("last_evening_date") if last_state else None
 
-        # ---------- 每日早/晚报发送窗口（时间窗口放宽至 35 分钟应对 CI/CD 延迟） ----------
-        is_morning_report = (now_bj.hour == 9 and 0 <= now_bj.minute < 35)
-        is_evening_report = (now_bj.hour == 18 and 0 <= now_bj.minute < 35)
+        # 只要过了上午 09:00 且今天还没发过早报，就触发
+        is_morning_report = (now_bj.hour >= 9) and (last_morning_date != today_str)
+        # 只要过了下午 18:00 且今天还没发过晚报，就触发
+        is_evening_report = (now_bj.hour >= 18) and (last_evening_date != today_str)
 
         if is_morning_report or is_evening_report:
             rt = "早报" if is_morning_report else "晚报"
@@ -244,9 +247,23 @@ def main():
                 sanya_summary,
                 "",
                 f"官方购票入口: {TARGET_URL}",
-                "服务：每 10 分钟监控自动运行中。"
+                "服务：监控自动运行中。"
             ]
-            send_email(f"📊【每日{rt}】HYROX 赛事余票汇总", "\n".join(body_lines))
+            if send_email(f"📊【每日{rt}】HYROX 赛事余票汇总", "\n".join(body_lines)):
+                if is_morning_report:
+                    current_state["last_morning_date"] = today_str
+                if is_evening_report:
+                    current_state["last_evening_date"] = today_str
+
+        # 保持历史发报记录（如果本次没有触发发报，继承上一轮记录）
+        if last_state:
+            if "last_morning_date" in last_state and "last_morning_date" not in current_state:
+                current_state["last_morning_date"] = last_state["last_morning_date"]
+            if "last_evening_date" in last_state and "last_evening_date" not in current_state:
+                current_state["last_evening_date"] = last_state["last_evening_date"]
+
+        # 保存本轮状态及早晚报发送记录到 Gist
+        save_current_state(current_state)
 
     except Exception as err:
         err_msg = f"HYROX 脚本异常\n时间:{now_bj.strftime('%Y-%m-%d %H:%M:%S')}\n错误:{str(err)}"
